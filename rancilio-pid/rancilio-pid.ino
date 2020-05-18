@@ -1034,9 +1034,8 @@ void setup() {
           // eeprom schließen
           EEPROM.commit();
         }
-      }
-      if (WiFi.status() != WL_CONNECTED || Blynk.connected() != true) {
-        displaymessage("Begin Fallback,", "No Blynk/Wifi");
+      } else {
+        displaymessage("Begin Fallback,", "No Wifi");
         delay(2000);
         DEBUG_println("Start offline mode with eeprom values, no wifi or blynk :(");
         Offlinemodus = 1 ;
