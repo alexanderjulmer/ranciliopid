@@ -1037,8 +1037,7 @@ void setup() {
       } else {
         displaymessage("Begin Fallback,", "No Wifi");
         delay(2000);
-        DEBUG_println("Start offline mode with eeprom values, no wifi or blynk :(");
-        Offlinemodus = 1 ;
+        DEBUG_println("Start offline with eeprom values, no wifi :(");        
         // eeprom öffnen
         EEPROM.begin(1024);
         // eeprom werte prüfen, ob numerisch
@@ -1066,6 +1065,7 @@ void setup() {
         {
           displaymessage("No eeprom,", "Value");
           DEBUG_println("No working eeprom value, I am sorry, but use default offline value  :)");
+          Offlinemodus = 1 ;
           delay(2000);
         }
         // eeeprom schließen
