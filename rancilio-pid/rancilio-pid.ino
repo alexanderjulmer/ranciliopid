@@ -1,5 +1,5 @@
 /********************************************************
-   Version 2.1.0  (29.05.2020) MQTT
+   Version 2.1.1  (29.05.2020) beta
 ******************************************************/
 
 /********************************************************
@@ -16,6 +16,7 @@
 #include "icon.h"   //user icons for display
 #include <MQTT.h>
 #include <IotWebConf.h>
+#include <ZACwire.h> //https://github.com/lebuni/ZACwire-Library
 
 /********************************************************
   DEFINES
@@ -107,7 +108,7 @@ int pidON = 1 ;                 // 1 = control loop in closed loop
 int relayON, relayOFF;          // used for relay trigger type. Do not change!
 boolean kaltstart = true;       // true = Rancilio started for first time
 boolean emergencyStop = false;  // Notstop bei zu hoher Temperatur
-const char* sysVersion PROGMEM  = "Version 2.1.0 MASTER";   //System version
+const char* sysVersion PROGMEM  = "Version 2.1.1 beta";   //System version
 int inX = 0, inY = 0, inOld = 0, inSum = 0; //used for filter()
 int bars = 0; //used for getSignalStrength()
 boolean brewDetected = 0;
@@ -217,7 +218,8 @@ DeviceAddress sensorDeviceAddress;     // arrays to hold device address
 /********************************************************
    Temp Sensors TSIC 306
 ******************************************************/
-TSIC Sensor1(ONE_WIRE_BUS);   // only Signalpin, VCCpin unused by default
+//TSIC Sensor1(ONE_WIRE_BUS);   // only Signalpin, VCCpin unused by default
+ZACwire<ONE_WIRE_BUS> Sensor1(306);   // only Signalpin, VCCpin unused by default
 uint16_t temperature = 0;     // internal variable used to read temeprature
 float Temperatur_C = 0;       // internal variable that holds the converted temperature in °C
 
@@ -801,9 +803,10 @@ void refreshTemp() {
       /*  variable "temperature" must be set to zero, before reading new data
             getTemperature only updates if data is valid, otherwise "temperature" will still hold old values
       */
-      temperature = 0;
-      Sensor1.getTemperature(&temperature);
-      Temperatur_C = Sensor1.calc_Celsius(&temperature);
+      //temperature = 0;
+      //Sensor1.getTemperature(&temperature);
+      //Temperatur_C = Sensor1.calc_Celsius(&temperature);
+      Temperatur_C = Sensor1.getTemp();   // getTemp() only updates if data is valid, otherwise "Input" will still hold old values
       //Temperatur_C = random(130,131);
       if (!checkSensor(Temperatur_C) && firstreading == 0) return;  //if sensor data is not valid, abort function; Sensor must be read at least one time at system startup
       Input = Temperatur_C;
@@ -1011,7 +1014,7 @@ void printScreen() {
       u8g2.print((char)176);
       u8g2.print("C");
 
-      // Draw heat bar
+      // Draw heat bar outline
       u8g2.drawLine(15, 58, 117, 58);
       u8g2.drawLine(15, 58, 15, 61);
       u8g2.drawLine(117, 58, 117, 61);
@@ -1361,8 +1364,14 @@ void setup() {
 
   if (TempSensor == 2) {
     temperature = 0;
-    Sensor1.getTemperature(&temperature);
-    Input = Sensor1.calc_Celsius(&temperature);
+    if (Sensor1.begin()){
+      Input = Sensor1.getTemp();
+      DEBUG_println(F("Temp sensor OK"));
+    } else {
+      DEBUG_println(F("Temp sensor failed"));
+    } 
+    //Sensor1.getTemperature(&temperature);
+    //Input = Sensor1.calc_Celsius(&temperature);
   }
 
   /********************************************************
@@ -1374,11 +1383,6 @@ void setup() {
       readingstime[thisReading] = 0;
       readingchangerate[thisReading] = 0;
     }
-  }
-  if (TempSensor == 2) {
-    temperature = 0;
-    Sensor1.getTemperature(&temperature);
-    Input = Sensor1.calc_Celsius(&temperature);
   }
 
   //Initialisation MUST be at the very end of the init(), otherwise the time comparision in loop() will have a big offset
