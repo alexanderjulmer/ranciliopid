@@ -338,7 +338,7 @@ void handleRoot()
 
 void saveToEEPROM() {
   DEBUG_print(F("Info: saving parameter to EEPROM..."));
-  EEPROM.begin(104);   // open eeprom
+  EEPROM.begin(512);   // open eeprom
   EEPROM.put(0, aggKp);
   EEPROM.put(8, aggTn);
   EEPROM.put(16, aggTv);
@@ -360,7 +360,7 @@ bool readFromEEPROM() {
   DEBUG_print(F("Info: reading parameter from EEPROM..."));
   if (iotWebConf.getState() > 1) {
     //DEBUG_println(F("INIT: skipping fallback, no WiFi config present"));
-    EEPROM.begin(104);     // open eeprom
+    EEPROM.begin(512);     // open eeprom
   }
   EEPROM.get(0, dummy);  // check first value, if it is numerical
   if (!isnan(dummy)) {
