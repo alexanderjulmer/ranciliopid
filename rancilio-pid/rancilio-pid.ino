@@ -16,7 +16,7 @@
 #include "icon.h"   //user icons for display
 #include <MQTT.h>
 #include <IotWebConf.h>
-#include <ZACwire.h> //https://github.com/lebuni/ZACwire-Library
+#include <ZACwire.h>  //https://github.com/lebuni/ZACwire-Library
 
 /********************************************************
   DEFINES
@@ -98,8 +98,10 @@ const unsigned long flushTime = FLUSHTIME;
 int maxflushCycles = MAXFLUSHCYCLES;
 
 //MQTT
+#ifdef MQTT
 WiFiClient net;
 MQTTClient client;
+#endif
 
 /********************************************************
    declarations
@@ -1067,7 +1069,7 @@ void printScreen() {
         u8g2.print(brewtimersoftware, 0);
       }
 
-      // Für Statusinfos       
+      // Für Statusinfos
       if (Offlinemodus == 0) {
         getSignalStrength();
         if (WiFi.status() != WL_CONNECTED) {
@@ -1102,22 +1104,22 @@ void sendToBlynk() {
   if (currentMillisBlynk - previousMillisBlynk >= intervalBlynk) {
 
     //MQTT
-    if (MQTT == 1) {
-      if (client.connect("arduino", "try", "try")) {
-        DEBUG_println("MQTT connected");
-      } else {
-        DEBUG_println("MQTT connection failed");
-      }
+#ifdef MQTT
+    if (client.connect("arduino", "try", "try")) {
+      DEBUG_println("MQTT connected");
+    } else {
+      DEBUG_println("MQTT connection failed");
     }
+#endif
 
     previousMillisBlynk = currentMillisBlynk;
     if (Blynk.connected()) {
       if (blynksendcounter == 1) {
         Blynk.virtualWrite(V2, Input);
         //MQTT
-        if (MQTT == 1) {
-          client.publish("/temp", String(Input));
-        }
+#ifdef MQTT
+        client.publish("/temp", String(Input));
+#endif
       }
       if (blynksendcounter == 2) {
         Blynk.virtualWrite(V23, Output);
@@ -1125,9 +1127,9 @@ void sendToBlynk() {
       if (blynksendcounter == 3) {
         Blynk.virtualWrite(V7, setPoint);
         //MQTT
-        if (MQTT == 1) {
-          client.publish("/setPoint", String(setPoint));
-        }
+#ifdef MQTT
+        client.publish("/setPoint", String(setPoint));
+#endif
       }
       if (blynksendcounter == 4) {
         Blynk.virtualWrite(V35, heatrateaverage);
@@ -1245,18 +1247,19 @@ void ICACHE_RAM_ATTR onTimer1ISR() {
 }
 
 //MQTT
-void messageReceived(String &topic, String &payload) {
+#ifdef MQTT
+void messageReceived(String & topic, String & payload) {
   //DEBUG_println("incoming: " + topic + " - " + payload);
   setPoint = payload.toDouble();
 }
-
+#endif
 void setup() {
   DEBUGSTART(115200);
 
-  if (MQTT == 1) {
-    //MQTT
-    client.begin(MQTTSERVER, net);
-  }
+#ifdef MQTT
+  //MQTT
+  client.begin(MQTTSERVER, net);
+#endif
 
   /********************************************************
     Define trigger type
@@ -1329,12 +1332,12 @@ void setup() {
 
   if (TempSensor == 2) {
     temperature = 0;
-    if (Sensor1.begin()){
+    if (Sensor1.begin()) {
       Input = Sensor1.getTemp();
       DEBUG_println(F("Temp sensor OK"));
     } else {
       DEBUG_println(F("Temp sensor failed"));
-    } 
+    }
     //Sensor1.getTemperature(&temperature);
     //Input = Sensor1.calc_Celsius(&temperature);
   }
@@ -1377,9 +1380,9 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED && Offlinemodus == 0) {
 
     //MQTT
-    if (MQTT == 1) {
-      client.loop();
-    }
+#ifdef MQTT
+    client.loop();
+#endif
 
     ArduinoOTA.handle();  // For OTA
     // Disable interrupt it OTA is starting, otherwise it will not work
@@ -1407,10 +1410,10 @@ void loop() {
   }
 
   //MQTT
-  if (MQTT == 1) {
-    client.subscribe("/solltemp");
-    client.onMessage(messageReceived);
-  }
+#ifdef MQTT
+  client.subscribe("/solltemp");
+  client.onMessage(messageReceived);
+#endif
 
   refreshTemp();   //read new temperature values
   testEmergencyStop();  // test if Temp is to high
