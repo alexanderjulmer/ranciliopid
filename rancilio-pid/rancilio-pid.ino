@@ -391,7 +391,7 @@ bool readFromEEPROM() {
   WiFi connection function, also used for reconnecting
   abort function if offline, or brew is running
 *****************************************************/
-void connectWifi(const char* ssid, const char* password) {
+void connectWifi(const char* ssid2, const char* password2) {
   if (Offlinemodus == 1 || brewcounter > 11) return;
   if (setupDone == false) {
     unsigned long started = millis();
@@ -403,10 +403,10 @@ void connectWifi(const char* ssid, const char* password) {
     WiFi.mode(WIFI_STA);
     WiFi.persistent(false);   // needed, otherwise exceptions are triggered \o.O/
     WiFi.setSleepMode(WIFI_NONE_SLEEP); // needed to prevent other bugs
-    WiFi.begin(ssid, pass);
+    WiFi.begin(ssid2, password2);
     DEBUG_println(F("done"));
     DEBUG_print(F("INIT: Connecting WiFi to: "));
-    DEBUG_print(ssid);
+    DEBUG_print(ssid2);
     DEBUG_print("...");
     // wait up to 20 seconds for connection:
     while ((WiFi.status() != WL_CONNECTED) && (millis() - started < 20000))
@@ -427,7 +427,7 @@ void connectWifi(const char* ssid, const char* password) {
     WiFi.persistent(false);   // needed, otherwise exceptions are triggered \o.O/
     WiFi.disconnect(true);
     WiFi.setSleepMode(WIFI_NONE_SLEEP); // needed to prevent other bugs
-    WiFi.begin(ssid, pass);
+    WiFi.begin(ssid2, password2);
     // TODO, add status on display? see old checkWifi function
   }
 }
