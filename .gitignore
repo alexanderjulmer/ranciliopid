@@ -6,3 +6,4 @@ rancilio-pid/.vscode/settings.json
 .pio/*
 
 .DS_Store
+.vscode
