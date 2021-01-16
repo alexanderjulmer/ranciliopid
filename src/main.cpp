@@ -702,8 +702,9 @@ void refreshTemp()
 
 bool targetWeightReached()
 {
-  left = scaleLeft.get_units()
-             right = scaleRight.get_units() long currentWeight = (left + right);
+  long left = scaleLeft.get_units();
+  long right = scaleRight.get_units();
+  long currentWeight = (left + right);
   Serial.println(currentWeight);
   return (currentWeight >= targetWeight);
 };
@@ -726,7 +727,8 @@ void brew()
     if (brewcounter > 10)
     {
       bezugsZeit = currentMillistemp - startZeit;
-      scale.tare();
+      scaleLeft.tare();
+      scaleRight.tare();
     }
 
     totalbrewtime = preinfusion + preinfusionpause + brewtime; // running every cycle, in case changes are done during brew
@@ -1548,8 +1550,8 @@ void setup()
      SCALES
   ******************************************************/
   // This initializes the scales
-  scaleLeft.begin(dataPin, clockPin);
-  scaleRight.begin(dataPin, clockPin);
+  scaleLeft.begin(dataPinLeft, clockPinLeft);
+  scaleRight.begin(dataPinRight, clockPinRight);
 
   // Calibrate to initially weighted value
   scaleLeft.set_scale(scaleCalibration);
