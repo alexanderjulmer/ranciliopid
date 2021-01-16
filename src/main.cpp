@@ -19,6 +19,7 @@
 #include "icon.h"    //user icons for display
 #include <ZACwire.h> //NEW TSIC LIB
 #include <PubSubClient.h>
+#include <HX711.h>
 
 /********************************************************
   DEFINES
@@ -165,8 +166,11 @@ unsigned long startZeit = 0;                        //start time of brew
 const unsigned long analogreadingtimeinterval = 10; // ms
 unsigned long previousMillistempanalogreading;      // ms for analogreading
 
+// Target weight at the end of brewing, ignoring weight of cup
+long targetWeight = 7.0;
+
 /********************************************************
-   Sensor check
+  Sensor check
 ******************************************************/
 boolean sensorError = false;
 int error = 0;
@@ -207,6 +211,21 @@ double aggKi = aggKp / aggTn;
 double aggKd = aggTv * aggKp;
 
 PID bPID(&Input, &Output, &setPoint, aggKp, aggKi, aggKd, PonE, DIRECT); //PID initialisation
+
+/********************************************************
+   DALLAS TEMP
+******************************************************/
+
+HX711 scaleLeft;
+uint8_t dataPinLeft = 5;
+uint8_t clockPinLeft = 6;
+HX711 scaleRight;
+uint8_t dataPinRight = 5;
+uint8_t clockPinRight = 6;
+// This is the calibration value for each load cell, you need to calibrate
+// them with a known weight The good thing is that the value is linear so if
+// you know something weights 100g you can calculate what the value should be.
+#define scaleCalibration 170
 
 /********************************************************
    DALLAS TEMP
@@ -678,6 +697,18 @@ void refreshTemp()
 }
 
 /********************************************************
+    Functions for scales
+******************************************************/
+
+bool targetWeightReached()
+{
+  left = scaleLeft.get_units()
+             right = scaleRight.get_units() long currentWeight = (left + right);
+  Serial.println(currentWeight);
+  return (currentWeight >= targetWeight);
+};
+
+/********************************************************
     PreInfusion, Brew , if not Only PID
 ******************************************************/
 void brew()
@@ -695,6 +726,7 @@ void brew()
     if (brewcounter > 10)
     {
       bezugsZeit = currentMillistemp - startZeit;
+      scale.tare();
     }
 
     totalbrewtime = preinfusion + preinfusionpause + brewtime; // running every cycle, in case changes are done during brew
@@ -745,7 +777,7 @@ void brew()
       brewcounter = 41;
       break;
     case 41: //waiting time brew
-      if (bezugsZeit > totalbrewtime)
+      if ((bezugsZeit > totalbrewtime) || targetWeightReached())
       {
         brewcounter = 42;
       }
@@ -1511,6 +1543,21 @@ void setup()
     temperature = 0;
     Input = Sensor2.getTemp();
   }
+
+  /********************************************************
+     SCALES
+  ******************************************************/
+  // This initializes the scales
+  scaleLeft.begin(dataPin, clockPin);
+  scaleRight.begin(dataPin, clockPin);
+
+  // Calibrate to initially weighted value
+  scaleLeft.set_scale(scaleCalibration);
+  scaleRight.set_scale(scaleCalibration);
+
+  // set the scales to 0
+  scaleLeft.tare();
+  scaleRight.tare();
 
   /********************************************************
     movingaverage ini array
