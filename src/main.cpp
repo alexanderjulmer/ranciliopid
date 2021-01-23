@@ -1,8 +1,5 @@
 /********************************************************
-   Version 2.1.2-hotfix2  (30.12.2020) 
-   * ADD ZACwire (New TSIC lib)
-   * Auslagern der PIN Belegung in die UserConfig
-   * Change MQTT Lib to PubSubClient | thx to pbeh
+   Version 2.1.1  (29.05.2020) MQTT
 ******************************************************/
 
 /********************************************************
@@ -14,11 +11,14 @@
 #include <U8g2lib.h>
 #include "PID_v1.h"            //for PID calculation
 #include <DallasTemperature.h> //Library for dallas temp sensor
-#include <ESP8266WiFi.h>
+#include "TSIC.h"              //Library for TSIC temp sensor
+#if ESP8266
 #include <BlynkSimpleEsp8266.h>
-#include "icon.h"    //user icons for display
-#include <ZACwire.h> //NEW TSIC LIB
-#include <PubSubClient.h>
+#else
+#include <BlynkSimpleEsp32.h>
+#endif
+#include "icon.h" //user icons for display
+#include "MQTT.h"
 #include <HX711.h>
 
 /********************************************************
@@ -38,6 +38,25 @@
 #define DEBUG_print(a) Serial.print(a);
 #define DEBUGSTART(a) Serial.begin(a);
 #endif
+
+#define pinRelayVentil 12 //Output pin for 3-way-valve
+#define pinRelayPumpe 13  //Output pin for pump
+#define pinRelayHeater 14 //Output pin for heater
+
+#define pinClockWeightCellLeft 17      // Clock pin for left weight cell
+#define pinClockWeightCellRight 18     // Clock pin for right weight cell
+#define pinDataWeightCellLeft 19       // Data pin for left weight cell
+#define pinDataWeightCellRight 20      // Data pin for right weight cell
+#define calibrationWeightCellLeft 170  // Calibration Value left
+#define calibrationWeightCellRight 170 // Calibration Value right
+
+#define OLED_RESET 16    //Output pin for dispaly reset pin
+#define OLED_SCL 5       //Output pin for dispaly clock pin
+#define OLED_SDA 4       //Output pin for dispaly data pin
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+#define ONE_WIRE_BUS 2 // Data wire is plugged into port 2 on the Arduino
 
 /********************************************************
    DISPLAY constructor, change if needed
@@ -90,28 +109,18 @@ int maxflushCycles = MAXFLUSHCYCLES;
 
 //MQTT
 WiFiClient net;
-PubSubClient mqtt(net);
-const char *mqtt_server_ip = MQTT_SERVER_IP;
-const int mqtt_server_port = MQTT_SERVER_PORT;
-const char *mqtt_username = MQTT_USERNAME;
-const char *mqtt_password = MQTT_PASSWORD;
-const char *mqtt_topic_prefix = MQTT_TOPIC_PREFIX;
-char topic_will[256];
-char topic_set[256];
-unsigned long lastMQTTConnectionAttempt = millis();
-unsigned int MQTTReCnctFlag;      // Blynk Reconnection Flag
-unsigned int MQTTReCnctCount = 0; // Blynk Reconnection counter
+MQTTClient client;
 
 /********************************************************
    declarations
 ******************************************************/
-int pidON = 1;                                              // 1 = control loop in closed loop
-int relayON, relayOFF;                                      // used for relay trigger type. Do not change!
-boolean kaltstart = true;                                   // true = Rancilio started for first time
-boolean emergencyStop = false;                              // Notstop bei zu hoher Temperatur
-const char *sysVersion PROGMEM = "Version 2.1.2-h1 MASTER"; //System version
-int inX = 0, inY = 0, inOld = 0, inSum = 0;                 //used for filter()
-int bars = 0;                                               //used for getSignalStrength()
+int pidON = 1;                                           // 1 = control loop in closed loop
+int relayON, relayOFF;                                   // used for relay trigger type. Do not change!
+boolean kaltstart = true;                                // true = Rancilio started for first time
+boolean emergencyStop = false;                           // Notstop bei zu hoher Temperatur
+const char *sysVersion PROGMEM = "Version 2.1.1 MASTER"; //System version
+int inX = 0, inY = 0, inOld = 0, inSum = 0;              //used for filter()
+int bars = 0;                                            //used for getSignalStrength()
 boolean brewDetected = 0;
 boolean setupDone = false;
 int backflushON = 0;     // 1 = activate backflush
@@ -166,11 +175,13 @@ unsigned long startZeit = 0;                        //start time of brew
 const unsigned long analogreadingtimeinterval = 10; // ms
 unsigned long previousMillistempanalogreading;      // ms for analogreading
 
-// Target weight at the end of brewing, ignoring weight of cup
+/********************************************************
+   Weight Cells
+******************************************************/
 long targetWeight = 7.0;
 
 /********************************************************
-  Sensor check
+   Sensor check
 ******************************************************/
 boolean sensorError = false;
 int error = 0;
@@ -184,9 +195,16 @@ const unsigned long intervaltempmestsic = 400;
 const unsigned long intervaltempmesds18b20 = 400;
 int pidMode = 1; //1 = Automatic, 0 = Manual
 
+//volatile unsigned int interruptCounter;
+//int totalInterruptCounter;
+
+hw_timer_t *timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
 const unsigned int windowSize = 1000;
-unsigned int isrCounter = 0; // counter for ISR
-unsigned long windowStartTime;
+volatile unsigned int isrCounter = 0; // counter for ISR
+//unsigned long windowStartTime;
+
 double Input, Output;
 double setPointTemp;
 double previousInput = 0;
@@ -215,32 +233,22 @@ PID bPID(&Input, &Output, &setPoint, aggKp, aggKi, aggKd, PonE, DIRECT); //PID i
 /********************************************************
    DALLAS TEMP
 ******************************************************/
-
-HX711 scaleLeft;
-uint8_t dataPinLeft = 5;
-uint8_t clockPinLeft = 6;
-HX711 scaleRight;
-uint8_t dataPinRight = 5;
-uint8_t clockPinRight = 6;
-// This is the calibration value for each load cell, you need to calibrate
-// them with a known weight The good thing is that the value is linear so if
-// you know something weights 100g you can calculate what the value should be.
-#define scaleCalibration 170
-
-/********************************************************
-   DALLAS TEMP
-******************************************************/
 OneWire oneWire(ONE_WIRE_BUS);       // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 DallasTemperature sensors(&oneWire); // Pass our oneWire reference to Dallas Temperature.
 DeviceAddress sensorDeviceAddress;   // arrays to hold device address
 
 /********************************************************
+   HX7111
+******************************************************/
+HX711 weightCellLeft;
+HX711 weightCellRight;
+
+/********************************************************
    Temp Sensors TSIC 306
 ******************************************************/
-uint16_t temperature = 0; // internal variable used to read temeprature
-float Temperatur_C = 0;   // internal variable that holds the converted temperature in °C
-
-ZACwire<ONE_WIRE_BUS> Sensor2(306); // set pin "2" to receive signal from the TSic "306"
+TSIC Sensor1(ONE_WIRE_BUS); // only Signalpin, VCCpin unused by default
+uint16_t temperature = 0;   // internal variable used to read temeprature
+float Temperatur_C = 0;     // internal variable that holds the converted temperature in °C
 
 /********************************************************
    BLYNK
@@ -356,6 +364,46 @@ int filter(int input)
 }
 
 /********************************************************
+  Get Wifi signal strength and set bars for display
+*****************************************************/
+void getSignalStrength()
+{
+  if (Offlinemodus == 1)
+    return;
+
+  long rssi;
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    rssi = WiFi.RSSI();
+  }
+  else
+  {
+    rssi = -100;
+  }
+
+  if (rssi >= -50)
+  {
+    bars = 4;
+  }
+  else if ((rssi < -50) & (rssi >= -65))
+  {
+    bars = 3;
+  }
+  else if ((rssi < -65) & (rssi >= -75))
+  {
+    bars = 2;
+  }
+  else if ((rssi < -75) & (rssi >= -80))
+  {
+    bars = 1;
+  }
+  else
+  {
+    bars = 0;
+  }
+}
+
+/********************************************************
   Read analog input pin
 *****************************************************/
 void readAnalogInput()
@@ -403,7 +451,6 @@ void backflush()
   digitalWrite(pinRelayHeater, LOW); //Stop heating
 
   readAnalogInput();
-  // unsigned long currentMillistemp = millis();
 
   if (brewswitch < 1000 && backflushState > 10)
   { //abort function for state machine from every state
@@ -679,7 +726,8 @@ void refreshTemp()
             getTemperature only updates if data is valid, otherwise "temperature" will still hold old values
       */
       temperature = 0;
-      Temperatur_C = Sensor2.getTemp();
+      Sensor1.getTemperature(&temperature);
+      Temperatur_C = Sensor1.calc_Celsius(&temperature);
       //Temperatur_C = random(130,131);
       if (!checkSensor(Temperatur_C) && firstreading == 0)
         return; //if sensor data is not valid, abort function; Sensor must be read at least one time at system startup
@@ -702,8 +750,8 @@ void refreshTemp()
 
 bool targetWeightReached()
 {
-  long left = scaleLeft.get_units();
-  long right = scaleRight.get_units();
+  long left = weightCellLeft.get_units();
+  long right = weightCellRight.get_units();
   long currentWeight = (left + right);
   Serial.println(currentWeight);
   return (currentWeight >= targetWeight);
@@ -727,8 +775,8 @@ void brew()
     if (brewcounter > 10)
     {
       bezugsZeit = currentMillistemp - startZeit;
-      scaleLeft.tare();
-      scaleRight.tare();
+      weightCellLeft.tare();
+      weightCellRight.tare();
     }
 
     totalbrewtime = preinfusion + preinfusionpause + brewtime; // running every cycle, in case changes are done during brew
@@ -887,46 +935,6 @@ void checkWifi()
   }
 }
 
-/********************************************************
-  Get Wifi signal strength and set bars for display
-*****************************************************/
-void getSignalStrength()
-{
-  if (Offlinemodus == 1)
-    return;
-
-  long rssi;
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    rssi = WiFi.RSSI();
-  }
-  else
-  {
-    rssi = -100;
-  }
-
-  if (rssi >= -50)
-  {
-    bars = 4;
-  }
-  else if ((rssi < -50) & (rssi >= -65))
-  {
-    bars = 3;
-  }
-  else if ((rssi < -65) & (rssi >= -75))
-  {
-    bars = 2;
-  }
-  else if ((rssi < -75) & (rssi >= -80))
-  {
-    bars = 1;
-  }
-  else
-  {
-    bars = 0;
-  }
-}
-
 /*******************************************************
    Check if Blynk is connected, if not reconnect
    abort function if offline, or brew is running
@@ -948,72 +956,6 @@ void checkBlynk()
       Blynk.connect(3000); // Try to reconnect to the server; connect() is a blocking function, watch the timeout!
     }
   }
-}
-
-/*******************************************************
-   Check if MQTT is connected, if not reconnect
-   abort function if offline, or brew is running
-   MQTT is also using maxWifiReconnects!
-*****************************************************/
-void checkMQTT()
-{
-  if (Offlinemodus == 1 || brewcounter > 11)
-    return;
-  if ((millis() - lastMQTTConnectionAttempt >= wifiConnectionDelay) && (MQTTReCnctCount <= maxWifiReconnects))
-  {
-    int statusTemp = mqtt.connected();
-    if (statusTemp != 1)
-    {                                       // check Blynk connection status
-      lastMQTTConnectionAttempt = millis(); // Reconnection Timer Function
-      MQTTReCnctCount++;                    // Increment reconnection Counter
-      DEBUG_print("Attempting MQTT reconnection: ");
-      DEBUG_println(MQTTReCnctCount);
-      if (mqtt.connect(hostname, mqtt_username, mqtt_password, topic_will, 0, 0, "exit") == true)
-        ;
-      {
-        mqtt.subscribe(topic_set);
-      } // Try to reconnect to the server; connect() is a blocking function, watch the timeout!
-    }
-  }
-}
-
-/*******************************************************
-   Convert double, float int and uint to char
-   for MQTT Publish
-*****************************************************/
-char number2string_double[22];
-char *number2string(double in)
-{
-  snprintf(number2string_double, sizeof(number2string_double), "%0.2f", in);
-  return number2string_double;
-}
-char number2string_float[22];
-char *number2string(float in)
-{
-  snprintf(number2string_float, sizeof(number2string_float), "%0.2f", in);
-  return number2string_float;
-}
-char number2string_int[22];
-char *number2string(int in)
-{
-  snprintf(number2string_int, sizeof(number2string_int), "%d", in);
-  return number2string_int;
-}
-char number2string_uint[22];
-char *number2string(unsigned int in)
-{
-  snprintf(number2string_uint, sizeof(number2string_uint), "%u", in);
-  return number2string_uint;
-}
-
-/*******************************************************
-   Publish Data to MQTT
-*****************************************************/
-void mqtt_publish(char *reading, char *payload)
-{
-  char topic[120];
-  snprintf(topic, 120, "%s%s/%s", mqtt_topic_prefix, hostname, reading);
-  mqtt.publish(topic, payload);
 }
 
 /********************************************************
@@ -1156,7 +1098,7 @@ void printScreen()
         }
         if (MQTT == 1)
         {
-          if (mqtt.connect(hostname, mqtt_username, mqtt_password))
+          if (client.connect("arduino", "try", "try"))
           {
             u8g2.setCursor(77, 2);
             u8g2.print("MQTT");
@@ -1195,7 +1137,14 @@ void sendToBlynk()
     //MQTT
     if (MQTT == 1)
     {
-      checkMQTT();
+      if (client.connect("arduino", "try", "try"))
+      {
+        DEBUG_println("MQTT connected");
+      }
+      else
+      {
+        DEBUG_println("MQTT connection failed");
+      }
     }
 
     previousMillisBlynk = currentMillisBlynk;
@@ -1207,7 +1156,7 @@ void sendToBlynk()
         //MQTT
         if (MQTT == 1)
         {
-          mqtt_publish("temperature", number2string(Input));
+          client.publish("/temp", String(Input));
         }
       }
       if (blynksendcounter == 2)
@@ -1220,7 +1169,7 @@ void sendToBlynk()
         //MQTT
         if (MQTT == 1)
         {
-          mqtt_publish("setPoint", number2string(setPoint));
+          client.publish("/setPoint", String(setPoint));
         }
       }
       if (blynksendcounter == 4)
@@ -1297,20 +1246,24 @@ void brewdetection()
 /********************************************************
     Timer 1 - ISR for PID calculation and heat realay output
 ******************************************************/
-void ICACHE_RAM_ATTR onTimer1ISR()
+void IRAM_ATTR onTimer()
 {
-  timer1_write(6250); // set interrupt time to 20ms
+
+  portENTER_CRITICAL_ISR(&timerMux);
+  //interruptCounter++;
 
   if (Output <= isrCounter)
   {
     digitalWrite(pinRelayHeater, LOW);
+    //DEBUG_println("Power off!");
   }
   else
   {
     digitalWrite(pinRelayHeater, HIGH);
+    //DEBUG_println("Power on!");
   }
 
-  isrCounter += 20; // += 20 because one tick = 20ms
+  isrCounter += 10; // += 10 because one tick = 10ms
   //set PID output as relais commands
   if (isrCounter > windowSize)
   {
@@ -1319,44 +1272,17 @@ void ICACHE_RAM_ATTR onTimer1ISR()
 
   //run PID calculation
   bPID.Compute();
+
+  timerAlarmWrite(timer, 6250, true);
+
+  portEXIT_CRITICAL_ISR(&timerMux);
 }
 
 //MQTT
-void mqtt_callback(char *topic, byte *data, unsigned int length)
+void messageReceived(String &topic, String &payload)
 {
   //DEBUG_println("incoming: " + topic + " - " + payload);
-  char topic_str[255];
-  os_memcpy(topic_str, topic, sizeof(topic_str));
-  topic_str[255] = '\0';
-  char data_str[length + 1];
-  os_memcpy(data_str, data, length);
-  data_str[length] = '\0';
-  //DEBUG_print("MQTT: %s = %s\n", topic_str, data_str);
-  char topic_pattern[255];
-  char configVar[120];
-  char cmd[64];
-  double data_double;
-
-  //DEBUG_print("mqtt_parse(%s, %s)\n", topic_str, data_str);
-  snprintf(topic_pattern, sizeof(topic_pattern), "%s%s/%%[^\\/]/%%[^\\/]", mqtt_topic_prefix, hostname);
-  //DEBUG_print("topic_pattern=%s\n",topic_pattern);
-  if ((sscanf(topic_str, topic_pattern, &configVar, &cmd) != 2) || (strcmp(cmd, "set") != 0))
-  {
-    //DEBUG_print("Ignoring topic (%s)\n", topic_str);
-    return;
-  }
-  if (strcmp(configVar, "setPoint") == 0)
-  {
-    sscanf(data_str, "%lf", &data_double);
-    setPoint = data_double;
-    return;
-  }
-  if (strcmp(configVar, "brewtime") == 0)
-  {
-    sscanf(data_str, "%lf", &data_double);
-    brewtime = data_double * 1000;
-    return;
-  }
+  setPoint = payload.toDouble();
 }
 
 void setup()
@@ -1366,11 +1292,7 @@ void setup()
   if (MQTT == 1)
   {
     //MQTT
-    snprintf(topic_will, sizeof(topic_will), "%s%s/%s", mqtt_topic_prefix, hostname, "will");
-    snprintf(topic_set, sizeof(topic_set), "%s%s/+/%s", mqtt_topic_prefix, hostname, "set");
-    mqtt.setServer(mqtt_server_ip, mqtt_server_port);
-    mqtt.setCallback(mqtt_callback);
-    checkMQTT();
+    client.begin("public.cloud.shiftr.io", net);
   }
 
   /********************************************************
@@ -1410,7 +1332,7 @@ void setup()
   ******************************************************/
   if (Offlinemodus == 0)
   {
-    WiFi.hostname(hostname);
+    WiFi.setHostname(hostname);
     unsigned long started = millis();
     displayLogo("1: Connect Wifi to:", ssid);
     /* Explicitly set the ESP8266 to be a WiFi-client, otherwise, it by default,
@@ -1543,23 +1465,24 @@ void setup()
   if (TempSensor == 2)
   {
     temperature = 0;
-    Input = Sensor2.getTemp();
+    Sensor1.getTemperature(&temperature);
+    Input = Sensor1.calc_Celsius(&temperature);
   }
 
   /********************************************************
      SCALES
   ******************************************************/
   // This initializes the scales
-  scaleLeft.begin(dataPinLeft, clockPinLeft);
-  scaleRight.begin(dataPinRight, clockPinRight);
+  weightCellLeft.begin(pinDataWeightCellLeft, pinClockWeightCellLeft);
+  weightCellRight.begin(pinDataWeightCellRight, pinClockWeightCellRight);
 
   // Calibrate to initially weighted value
-  scaleLeft.set_scale(scaleCalibration);
-  scaleRight.set_scale(scaleCalibration);
+  weightCellLeft.set_scale(calibrationWeightCellLeft);
+  weightCellRight.set_scale(calibrationWeightCellRight);
 
   // set the scales to 0
-  scaleLeft.tare();
-  scaleRight.tare();
+  weightCellLeft.tare();
+  weightCellRight.tare();
 
   /********************************************************
     movingaverage ini array
@@ -1576,28 +1499,34 @@ void setup()
   if (TempSensor == 2)
   {
     temperature = 0;
-    Input = Sensor2.getTemp();
+    Sensor1.getTemperature(&temperature);
+    Input = Sensor1.calc_Celsius(&temperature);
   }
 
   //Initialisation MUST be at the very end of the init(), otherwise the time comparision in loop() will have a big offset
   unsigned long currentTime = millis();
   previousMillistemp = currentTime;
-  windowStartTime = currentTime;
+  //windowStartTime = currentTime;
   previousMillisDisplay = currentTime;
   previousMillisBlynk = currentTime;
 
   /********************************************************
-    Timer1 ISR - Initialisierung
+    Timer ISR - Initialisierung
     TIM_DIV1 = 0,   //80MHz (80 ticks/us - 104857.588 us max)
     TIM_DIV16 = 1,  //5MHz (5 ticks/us - 1677721.4 us max)
     TIM_DIV256 = 3  //312.5Khz (1 tick = 3.2us - 26843542.4 us max)
   ******************************************************/
-  timer1_isr_init();
+  timer = timerBegin(0, 256, true);
+  timerAttachInterrupt(timer, &onTimer, true);
+  timerAlarmWrite(timer, 6250, true);
+  timerAlarmEnable(timer);
+  /*
   timer1_attachInterrupt(onTimer1ISR);
   //timer1_enable(TIM_DIV16, TIM_EDGE, TIM_SINGLE);
   //timer1_write(50000); // set interrupt time to 10ms
   timer1_enable(TIM_DIV256, TIM_EDGE, TIM_SINGLE);
   timer1_write(6250); // set interrupt time to 20ms
+  */
   setupDone = true;
 }
 
@@ -1610,25 +1539,21 @@ void loop()
     //MQTT
     if (MQTT == 1)
     {
-      checkMQTT();
-      if (mqtt.connected() == 1)
-      {
-        mqtt.loop();
-      }
+      client.loop();
     }
 
     ArduinoOTA.handle(); // For OTA
     // Disable interrupt it OTA is starting, otherwise it will not work
     ArduinoOTA.onStart([]() {
-      timer1_disable();
+      portENTER_CRITICAL_ISR(&timerMux);
       digitalWrite(pinRelayHeater, LOW); //Stop heating
     });
     ArduinoOTA.onError([](ota_error_t error) {
-      timer1_enable(TIM_DIV16, TIM_EDGE, TIM_SINGLE);
+      portEXIT_CRITICAL_ISR(&timerMux);
     });
     // Enable interrupts if OTA is finished
     ArduinoOTA.onEnd([]() {
-      timer1_enable(TIM_DIV16, TIM_EDGE, TIM_SINGLE);
+      portEXIT_CRITICAL_ISR(&timerMux);
     });
 
     if (Blynk.connected())
@@ -1645,6 +1570,13 @@ void loop()
   else
   {
     checkWifi();
+  }
+
+  //MQTT
+  if (MQTT == 1)
+  {
+    client.subscribe("/solltemp");
+    client.onMessage(messageReceived);
   }
 
   refreshTemp();       //read new temperature values
