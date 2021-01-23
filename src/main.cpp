@@ -45,8 +45,8 @@
 
 #define pinClockWeightCellLeft 17      // Clock pin for left weight cell
 #define pinClockWeightCellRight 18     // Clock pin for right weight cell
-#define pinDataWeightCellLeft 19       // Data pin for left weight cell
-#define pinDataWeightCellRight 20      // Data pin for right weight cell
+#define pinDataWeightCellLeft 20       // Data pin for left weight cell
+#define pinDataWeightCellRight 21      // Data pin for right weight cell
 #define calibrationWeightCellLeft 170  // Calibration Value left
 #define calibrationWeightCellRight 170 // Calibration Value right
 
