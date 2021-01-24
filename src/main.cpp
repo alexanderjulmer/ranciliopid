@@ -39,24 +39,24 @@
 #define DEBUGSTART(a) Serial.begin(a);
 #endif
 
-#define pinRelayVentil 12 //Output pin for 3-way-valve
-#define pinRelayPumpe 13  //Output pin for pump
-#define pinRelayHeater 14 //Output pin for heater
+#define pinRelayVentil 33 //Output pin for 3-way-valve
+#define pinRelayPumpe 32  //Output pin for pump
+#define pinRelayHeater 15 //Output pin for heater
 
-#define pinClockWeightCellLeft 17      // Clock pin for left weight cell
-#define pinClockWeightCellRight 18     // Clock pin for right weight cell
-#define pinDataWeightCellLeft 20       // Data pin for left weight cell
-#define pinDataWeightCellRight 21      // Data pin for right weight cell
+#define pinClockWeightCellLeft 27      // Clock pin for left weight cell
+#define pinClockWeightCellRight 25     // Clock pin for right weight cell
+#define pinDataWeightCellLeft 14       // Data pin for left weight cell
+#define pinDataWeightCellRight 26      // Data pin for right weight cell
 #define calibrationWeightCellLeft 170  // Calibration Value left
 #define calibrationWeightCellRight 170 // Calibration Value right
 
-#define OLED_RESET 16    //Output pin for dispaly reset pin
-#define OLED_SCL 5       //Output pin for dispaly clock pin
-#define OLED_SDA 4       //Output pin for dispaly data pin
+#define OLED_RESET -1    //Output pin for dispaly reset pin
+#define OLED_SCL 22       //Output pin for dispaly clock pin
+#define OLED_SDA 21       //Output pin for dispaly data pin
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
-#define ONE_WIRE_BUS 2 // Data wire is plugged into port 2 on the Arduino
+#define ONE_WIRE_BUS 13 // Data wire is plugged into port 2 on the Arduino
 
 /********************************************************
    DISPLAY constructor, change if needed
