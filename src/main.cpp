@@ -178,7 +178,7 @@ unsigned long previousMillistempanalogreading;      // ms for analogreading
 /********************************************************
    Weight Cells
 ******************************************************/
-long targetWeight = 7.0;
+long targetWeight = 30.0;
 
 /********************************************************
    Sensor check
